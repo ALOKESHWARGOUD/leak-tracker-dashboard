@@ -3,7 +3,7 @@ import pandas as pd
 import os
 from datetime import datetime
 from docx import Document
-from docx2pdf import convert
+import subprocess
 
 # ======================
 # LOAD DATA (SAFE)
@@ -53,10 +53,29 @@ def generate_summary(filtered, client):
     }
 
 # ======================
+# PDF CONVERSION (SAFE)
+# ======================
+def convert_to_pdf():
+    try:
+        subprocess.run([
+            "libreoffice",
+            "--headless",
+            "--convert-to", "pdf",
+            "report.docx"
+        ], check=True)
+        return "report.pdf"
+    except:
+        return None
+
+# ======================
 # WORD TEMPLATE → PDF
 # ======================
 def generate_word_report(summary, filtered):
     template_path = "DT_Template.docx"
+
+    if not os.path.exists(template_path):
+        st.error("Template file missing!")
+        return None
 
     doc = Document(template_path)
 
@@ -74,7 +93,7 @@ def generate_word_report(summary, filtered):
         if "{{severity}}" in para.text:
             para.text = para.text.replace("{{severity}}", summary["severity"])
 
-    # Insert table at end (simple version)
+    # Add table
     table = doc.add_table(rows=1, cols=4)
 
     hdr = table.rows[0].cells
@@ -93,10 +112,13 @@ def generate_word_report(summary, filtered):
     # Save Word file
     doc.save("report.docx")
 
-    # Convert to PDF
-    convert("report.docx", "report.pdf")
+    # Try PDF conversion
+    pdf_file = convert_to_pdf()
 
-    return "report.pdf"
+    if pdf_file and os.path.exists(pdf_file):
+        return pdf_file
+    else:
+        return "report.docx"   # fallback
 
 # ======================
 # UI
@@ -109,8 +131,6 @@ date_range = st.date_input("Select Date Range", [])
 
 filtered = df[df["client"] == client]
 
-date_label = "N/A"
-
 if len(date_range) == 2:
     start, end = date_range
 
@@ -118,13 +138,6 @@ if len(date_range) == 2:
         (filtered["date"] >= pd.to_datetime(start)) &
         (filtered["date"] <= pd.to_datetime(end))
     ]
-
-    if report_type == "Daily":
-        date_label = str(start)
-    elif report_type == "Weekly":
-        date_label = f"{start} to {end}"
-    elif report_type == "Monthly":
-        date_label = start.strftime("%B %Y")
 
 # SHOW DATA
 st.subheader("Filtered Data")
@@ -135,13 +148,16 @@ if st.button("Generate Report"):
     summary = generate_summary(filtered, client)
 
     if summary:
-        pdf_file = generate_word_report(summary, filtered)
+        file_path = generate_word_report(summary, filtered)
 
-        with open(pdf_file, "rb") as f:
-            st.download_button(
-                "⬇️ Download Report",
-                f,
-                file_name="Leak_Report.pdf"
-            )
+        if file_path:
+            with open(file_path, "rb") as f:
+                st.download_button(
+                    "⬇️ Download Report",
+                    f,
+                    file_name=file_path
+                )
+        else:
+            st.error("Report generation failed")
     else:
         st.warning("No data available for selected filters")
